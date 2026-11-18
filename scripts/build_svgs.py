@@ -12,6 +12,7 @@ Standard library only. Edit PROFILE / IMPORTANCE / WORLDS / ACHIEVEMENTS below.
 """
 
 import json
+import math
 import os
 import random
 import sys
@@ -171,24 +172,49 @@ def sprite(rows, x, y, scale, colors=None, extra=""):
 
 
 # Original pixel sprites ------------------------------------------------------
-HERO = [            # our fighter, nose to the right
-    "11000000000",
-    "01110000000",
-    "01111111000",
-    "11111112111",
-    "01111111000",
-    "01110000000",
-    "11000000000",
+# 1 = bright, 2 = body, 3 = shade, 4 = glow (cockpit / eye)
+HERO = [            # our fighter, nose to the right (16 x 11)
+    "0110000000000000",
+    "0121100000000000",
+    "0122211110000000",
+    "0012222221110000",
+    "1112233322221100",
+    "1222334433222211",
+    "1112233322221100",
+    "0012222221110000",
+    "0122211110000000",
+    "0121100000000000",
+    "0110000000000000",
 ]
-ENEMY = [           # raider, nose to the left
-    "000001111",
-    "000111100",
-    "011111110",
-    "112111111",
-    "011111110",
-    "000111100",
-    "000001111",
+HERO_PAL = {"1": NEON, "2": MID, "3": DIM, "4": "#c8ffb0"}
+ENEMY = [           # raider, nose to the left (14 x 9)
+    "00000011110000",
+    "00001122221011",
+    "00112223322110",
+    "01222233332221",
+    "12224433332221",
+    "01222233332221",
+    "00112223322110",
+    "00001122221011",
+    "00000011110000",
 ]
+ENEMY_PAL = {"1": MID, "2": DIM, "3": DARK, "4": NEON}
+
+
+def hero_sprite(s):
+    """Fighter (16 x 11 cells) with a flickering engine flame; (0, 0) is its top-left."""
+    return (sprite(["011", "111", "011"], -3 * s, 4 * s, s, {"1": "#c8ffb0"}, 'class="fa"')
+            + sprite(["0011", "1111", "0011"], -4 * s, 4 * s, s, {"1": MID}, 'class="fb"')
+            + sprite(HERO, 0, 0, s, HERO_PAL, 'filter="url(#glow)"'))
+
+
+def enemy_sprite(s):
+    """Raider (14 x 9 cells), exhaust flickering behind it on the right."""
+    return (sprite(["110", "111", "110"], 14 * s, 3 * s, s, {"1": DIM}, 'class="fa"')
+            + sprite(["1100", "1111", "1100"], 14 * s, 3 * s, s, {"1": DARK}, 'class="fb"')
+            + sprite(ENEMY, 0, 0, s, ENEMY_PAL))
+
+
 ASTEROID = [
     "0022220000",
     "0211112200",
@@ -240,6 +266,9 @@ DEFS = f"""<defs>
   @keyframes zapR {{ 0% {{ transform: translateX(0); opacity: 1; }} 85% {{ opacity: 1; }} 100% {{ transform: translateX(240px); opacity: 0; }} }}
   .zapL {{ animation: zapL 1.1s linear infinite; }}
   @keyframes zapL {{ 0% {{ transform: translateX(0); opacity: 1; }} 85% {{ opacity: 1; }} 100% {{ transform: translateX(-200px); opacity: 0; }} }}
+  .fa {{ animation: fl .14s steps(1) infinite; }}
+  .fb {{ animation: fl .14s steps(1) -.07s infinite; }}
+  @keyframes fl {{ 50% {{ opacity: 0; }} }}
   .boom {{ transform-box: fill-box; transform-origin: center; opacity: 0; animation: boom steps(6) infinite; }}
   @keyframes boom {{ 0% {{ opacity: 0; transform: scale(.4); }} 4% {{ opacity: 1; transform: scale(.7); }}
                      12% {{ opacity: 1; transform: scale(1.4); }} 18%,100% {{ opacity: 0; transform: scale(1.6); }} }}
@@ -278,8 +307,8 @@ def space(w, h, seed, comets=2, asteroids=2, lanes=(), rocks=None, opacity=0.9, 
     `lanes` are the y centres (px) of empty bands the ships fly along, so they
     never cross text. `rocks` lists (top, bottom) bands for the asteroids.
     In each lane our fighter flies right firing; a raider flies in from the
-    right, gets hit and explodes before they meet. Every element loops
-    forever; negative delays put things mid-flight the moment the image loads.
+    right, gets hit and explodes before they meet. Everything is clipped to
+    the inside of the frame and loops forever.
     """
     rnd = random.Random(seed)
     span = w + 200
@@ -288,7 +317,6 @@ def space(w, h, seed, comets=2, asteroids=2, lanes=(), rocks=None, opacity=0.9, 
            f"@keyframes goR{{from{{transform:translateX(0)}}to{{transform:translateX({span}px)}}}}",
            f"@keyframes goL{{from{{transform:translateX(0)}}to{{transform:translateX(-{span}px)}}}}"]
     out = []
-    # comets streak diagonally, then rest off-screen
     for _ in range(comets):
         y0 = rnd.uniform(-0.2, 0.5) * h
         ang = rnd.uniform(8, 24)
@@ -298,7 +326,6 @@ def space(w, h, seed, comets=2, asteroids=2, lanes=(), rocks=None, opacity=0.9, 
                    f'<g style="opacity:0;animation:cm {cycle:.1f}s linear {delay:.1f}s infinite">'
                    f'<rect x="-90" y="-1.5" width="90" height="3" fill="url(#tail)"/>'
                    f'<rect x="-2" y="-3" width="6" height="6" fill="{NEON}" filter="url(#glow)"/></g></g>')
-    # asteroids drift left while spinning, only inside the empty bands
     bands = rocks or [(0.08 * h, 0.85 * h)]
     for _ in range(asteroids):
         top, bottom = rnd.choice(bands)
@@ -311,13 +338,12 @@ def space(w, h, seed, comets=2, asteroids=2, lanes=(), rocks=None, opacity=0.9, 
                    f'<g transform="translate({w + 60},{y:.0f})">'
                    f'{sprite(ASTEROID, 0, 0, s, {"1": DARK, "2": DIM}, spin)}'
                    f'</g></g>')
-    # dogfights
     for i, yc in enumerate(lanes):
-        top = yc - 3.5 * ship - 3                     # centre the ship, allowing for the 6 px bob
+        top = yc - 5.5 * ship - 3                     # centre the ship, allowing for the 6 px bob
+        etop = yc - 4.5 * ship - 3
         dur = rnd.uniform(9, 13) * max(w, 500) / 1000 + 3
         off = -rnd.uniform(0, dur)
-        # the raider dies when our laser can reach it: about 120 px between noses
-        p = max(0.1, min(0.9, (w + 140 - 11 * ship - 120) / (2 * span)))
+        p = max(0.1, min(0.9, (w + 140 - 16 * ship - 140) / (2 * span)))
         pc = p * 100
         ex = w + 40 - p * span                        # raider's x when it is hit
         css.append(f"@keyframes ek{i}{{0%{{transform:translateX(0);opacity:1}}"
@@ -328,23 +354,135 @@ def space(w, h, seed, comets=2, asteroids=2, lanes=(), rocks=None, opacity=0.9, 
                    f"{pc + 0.3:.2f}%{{opacity:1;transform:scale(.8)}}"
                    f"{pc + 3:.2f}%{{opacity:1;transform:scale(1.5)}}"
                    f"{pc + 6:.2f}%,100%{{opacity:0;transform:scale(1.7)}}}}")
-        hero_glow = 'filter="url(#glow)"'
-        out.append(f'<g style="animation:goR {dur:.1f}s linear {off:.2f}s infinite"><g transform="translate(-100,{top:.0f})">'
+        out.append(f'<g style="animation:goR {dur:.1f}s linear {off:.2f}s infinite"><g transform="translate(-120,{top:.0f})">'
                    f'<g class="bob">'
-                   f'<rect x="{11 * ship}" y="{3 * ship}" width="{5 * ship}" height="{ship}" fill="{NEON}" class="zapR"/>'
-                   f'<rect x="{11 * ship}" y="{3 * ship}" width="{5 * ship}" height="{ship}" fill="{NEON}" class="zapR" style="animation-delay:-.4s"/>'
-                   f'{sprite(HERO, 0, 0, ship, {"1": NEON, "2": BG}, hero_glow)}'
-                   f'</g></g></g>')
-        out.append(f'<g style="animation:ek{i} {dur:.1f}s linear {off:.2f}s infinite"><g transform="translate({w + 40},{top:.0f})">'
+                   f'<rect x="{16 * ship}" y="{5 * ship}" width="{5 * ship}" height="{ship}" fill="{NEON}" class="zapR"/>'
+                   f'<rect x="{16 * ship}" y="{5 * ship}" width="{5 * ship}" height="{ship}" fill="{NEON}" class="zapR" style="animation-delay:-.4s"/>'
+                   f'{hero_sprite(ship)}</g></g></g>')
+        out.append(f'<g style="animation:ek{i} {dur:.1f}s linear {off:.2f}s infinite"><g transform="translate({w + 40},{etop:.0f})">'
                    f'<g class="bob">'
-                   f'<rect x="{-4 * ship}" y="{3 * ship}" width="{3 * ship}" height="{ship}" fill="{MID}" class="zapL"/>'
-                   f'{sprite(ENEMY, 0, 0, ship, {"1": MID, "2": BG})}'
-                   f'</g></g></g>')
+                   f'<rect x="{-4 * ship}" y="{4 * ship}" width="{3 * ship}" height="{ship}" fill="{MID}" class="zapL"/>'
+                   f'{enemy_sprite(ship)}</g></g></g>')
         boom = (f'style="transform-box:fill-box;transform-origin:center;opacity:0;'
                 f'animation:bk{i} {dur:.1f}s linear {off:.2f}s infinite"')
-        out.append(f'<g transform="translate({ex + 4.5 * ship - 15:.0f},{yc - 15:.0f})">'
+        out.append(f'<g transform="translate({ex + 7 * ship - 15:.0f},{yc - 13.5:.0f})">'
                    f'{sprite(BURST, 0, 0, 3, {"1": NEON}, boom)}</g>')
-    return f'<style>{"".join(css)}</style><g opacity="{opacity}">' + "".join(out) + "</g>"
+    clip = f'<clipPath id="spc"><rect x="13" y="13" width="{w - 26}" height="{h - 26}" rx="8"/></clipPath>'
+    return f'<defs>{clip}</defs><style>{"".join(css)}</style><g clip-path="url(#spc)" opacity="{opacity}">' + "".join(out) + "</g>"
+
+
+def arena():
+    """A little shoot-'em-up: scrolling stars, a raider wave, then a boss."""
+    w, h, T = 1000, 230, 10.0
+    lanes = [70, 118, 166]
+    hs, es, bs = 4, 4, 6                     # hero / raider / boss pixel sizes
+    hx = 100
+    nose = hx + 16 * hs
+
+    def pc(t):
+        return t / T * 100
+
+    def window(name, a, b):
+        """Visible from time a to time b of each loop, hidden otherwise."""
+        on = "0%" if a <= 0 else f"{pc(a):.3f}%"
+        off = "" if b >= T else f"{pc(b) + 0.01:.3f}%,100%{{opacity:0}}"
+        hidden = "" if a <= 0 else f"0%,{pc(a) - 0.01:.3f}%{{opacity:0}}"
+        last = "100%" if b >= T else f"{pc(b):.3f}%"
+        return f"@keyframes {name}{{{hidden}{on},{last}{{opacity:1}}{off}}}"
+
+    css, b = [], [frame(w, h)]
+    inner = []
+    # parallax starfield: two layers scrolling left, drawn twice for a seamless loop
+    rnd = random.Random(77)
+    for layer, (n, size, col, dur) in enumerate([(40, 2, DIM, 22), (18, 3, NEON, 9)]):
+        pts = [(rnd.uniform(0, w), rnd.uniform(16, h - 16)) for _ in range(n)]
+        rects = "".join(f'<rect x="{x + dx:.0f}" y="{y:.0f}" width="{size}" height="{size}" fill="{col}"/>'
+                        for x, y in pts for dx in (0, w))
+        css.append(f"@keyframes sl{layer}{{from{{transform:translateX(0)}}to{{transform:translateX(-{w}px)}}}}")
+        inner.append(f'<g style="animation:sl{layer} {dur}s linear infinite">{rects}</g>')
+
+    # the fights: (lane, enter, kill, speed, size, points)
+    fights = [(0, 0.2, 1.9, 250, es, 100), (2, 1.6, 3.6, 250, es, 100), (1, 3.2, 5.4, 250, es, 100),
+              (1, 5.8, 8.6, 150, bs, 500)]
+    # hero lines up with each target for the second before it dies
+    stops = [(0.0, lanes[1])]
+    for lane, _, tk, _, _, _ in fights:
+        fire = tk - (2.0 if tk > 8 else 1.0)
+        y = lanes[lane]
+        if stops[-1][1] != y:
+            stops.append((max(stops[-1][0], fire - 0.6), stops[-1][1]))
+            stops.append((fire, y))
+        stops.append((tk, y))
+    stops.append((T, lanes[1]))
+    css.append("@keyframes hy{" + "".join(f"{pc(t):.3f}%{{transform:translateY({y - 5.5 * hs - 3:.0f}px)}}" for t, y in stops) + "}")
+    inner.append(f'<g transform="translate({hx},0)"><g style="animation:hy {T}s ease-in-out infinite">'
+                 f'<g class="bob">{hero_sprite(hs)}</g></g></g>')
+
+    score, score_times = 0, [(0.0, 0)]
+    for i, (lane, te, tk, v, s, pts) in enumerate(fights):
+        y = lanes[lane]
+        top = y - 4.5 * s - 3
+        xk = 1060 - v * (tk - te)                       # where it is when it dies
+        ew = 14 * s
+        # enemy flight
+        css.append(f"@keyframes en{i}{{0%,{pc(te):.3f}%{{transform:translateX(1060px);opacity:0}}"
+                   f"{pc(te) + 0.01:.3f}%{{transform:translateX(1060px);opacity:1}}"
+                   f"{pc(tk):.3f}%{{transform:translateX({xk:.0f}px);opacity:1}}"
+                   f"{pc(tk) + 0.01:.3f}%,100%{{transform:translateX({xk:.0f}px);opacity:0}}}}")
+        fire = tk - (2.0 if s == bs else 1.0)
+        css.append(window(f"fw{i}", fire, tk))
+        # hits flash on the target's nose (and travel with it) while it takes fire
+        blink = 'class="blink"'
+        hits = (f'<g style="opacity:0;animation:fw{i} {T}s linear infinite" transform="translate({-2 * s},{4.5 * s - 3 * (2 if s == bs else 1.5):.0f})">'
+                f'{sprite(BURST, 0, 0, 2 if s == bs else 1.5, {"1": "#c8ffb0"}, blink)}</g>')
+        inner.append(f'<g style="animation:en{i} {T}s linear infinite"><g transform="translate(0,{top:.0f})">'
+                     f'<g class="bob" style="animation-delay:-{i * 0.5:.1f}s">'
+                     f'<rect x="{-4 * s}" y="{4 * s}" width="{3 * s}" height="{s}" fill="{MID}" class="zapL"/>'
+                     f'{enemy_sprite(s)}{hits}</g></g></g>')
+        # our laser stream: bolts reach the target's position at the start of
+        # the firing window, so they always connect as it closes in
+        x_start = 1060 - v * (fire - te)
+        dist = x_start - nose + 10
+        css.append(f"@keyframes zw{i}{{0%{{transform:translateX(0);opacity:1}}90%{{opacity:1}}100%{{transform:translateX({dist:.0f}px);opacity:0}}}}")
+        bolts = "".join(f'<rect x="{nose}" y="{y - 2:.0f}" width="22" height="4" fill="{NEON}" '
+                        f'style="animation:zw{i} .42s linear {-k * 0.14:.2f}s infinite"/>' for k in range(3))
+        inner.append(f'<g style="opacity:0;animation:fw{i} {T}s linear infinite" filter="url(#glow)">'
+                     f'{bolts}<rect x="{nose - 2}" y="{y - 5:.0f}" width="8" height="10" fill="#c8ffb0" class="blink"/></g>')
+        # explosion: burst, flying debris and a score popup
+        cx, cy = xk + ew / 2, y
+        big = 2 if s == bs else 1
+        css.append(f"@keyframes bx{i}{{0%,{pc(tk):.3f}%{{opacity:0;transform:scale(.4)}}{pc(tk) + 0.2:.3f}%{{opacity:1;transform:scale(.8)}}"
+                   f"{pc(tk) + 4:.3f}%{{opacity:1;transform:scale(1.6)}}{pc(tk) + 7:.3f}%,100%{{opacity:0;transform:scale(1.9)}}}}")
+        bw, bh = 10 * 4 * big, 9 * 4 * big
+        burst_style = f'style="transform-box:fill-box;transform-origin:center;opacity:0;animation:bx{i} {T}s linear infinite"'
+        inner.append(f'<g transform="translate({cx - bw / 2:.0f},{cy - bh / 2:.0f})">'
+                     f'{sprite(BURST, 0, 0, 4 * big, {"1": NEON}, burst_style)}</g>')
+        for d in range(10 * big):
+            ang = d / (10 * big) * 6.283 + rnd.uniform(-0.3, 0.3)
+            dist_d = rnd.uniform(40, 90) * big
+            dx, dy = dist_d * math.cos(ang), dist_d * math.sin(ang)
+            css.append(f"@keyframes db{i}_{d}{{0%,{pc(tk):.3f}%{{opacity:0;transform:translate(0,0)}}{pc(tk) + 0.2:.3f}%{{opacity:1;transform:translate(0,0)}}"
+                       f"{pc(tk) + 8:.3f}%,100%{{opacity:0;transform:translate({dx:.0f}px,{dy:.0f}px)}}}}")
+            size = rnd.choice([3, 4, 5])
+            inner.append(f'<rect x="{cx:.0f}" y="{cy:.0f}" width="{size}" height="{size}" fill="{rnd.choice([NEON, MID, "#c8ffb0"])}" '
+                         f'style="opacity:0;animation:db{i}_{d} {T}s linear infinite"/>')
+        css.append(f"@keyframes pt{i}{{0%,{pc(tk):.3f}%{{opacity:0;transform:translateY(0)}}{pc(tk) + 0.5:.3f}%{{opacity:1;transform:translateY(0)}}"
+                   f"{pc(tk) + 9:.3f}%{{opacity:1;transform:translateY(-26px)}}{pc(tk) + 11:.3f}%,100%{{opacity:0;transform:translateY(-30px)}}}}")
+        inner.append(f'<g style="opacity:0;animation:pt{i} {T}s linear infinite">{centered(f"+{pts}", cx, cy - bh / 2 - 22, 2 + big, "#c8ffb0")}</g>')
+        score += pts
+        score_times.append((tk, score))
+
+    # HUD: score that ticks up with each kill, wave label
+    hud = [pixel_text("SCORE", 30, 24, 2, DIM)]
+    for j, (t0, val) in enumerate(score_times):
+        t1 = score_times[j + 1][0] if j + 1 < len(score_times) else T
+        css.append(window(f"sc{j}", t0, t1 - 0.001 if j + 1 < len(score_times) else T))
+        hud.append(f'<g style="opacity:0;animation:sc{j} {T}s linear infinite">{pixel_text(f"{val:06d}", 100, 24, 2)}</g>')
+    hud.append(pixel_text("WAVE 01", w - 30 - text_width("WAVE 01", 2), 24, 2, DIM))
+    clip = f'<clipPath id="arn"><rect x="13" y="13" width="{w - 26}" height="{h - 26}" rx="8"/></clipPath>'
+    b.append(f'<defs>{clip}</defs><style>{"".join(css)}</style><g clip-path="url(#arn)">{"".join(inner)}</g>')
+    b.extend(hud)
+    return svg(w, h, "\n".join(b), "Space battle: my fighter shoots down a wave of raiders and a boss ship.")
 
 
 # --------------------------------------------------------------------------
@@ -526,7 +664,7 @@ def card(r, stage):
 
 def footer():
     w, h = 1000, 200
-    b = [frame(w, h), starfield(w, h, 30, 23), space(w, h, 505, comets=3, asteroids=3, lanes=(40, 164), rocks=[(20, 62), (142, 186)], opacity=0.8, ship=4)]
+    b = [frame(w, h), starfield(w, h, 30, 23), space(w, h, 505, comets=3, asteroids=3, lanes=(40, 164), rocks=[(20, 62), (142, 186)], opacity=0.8, ship=3)]
     b.append(centered("GAME OVER", w / 2, 68, 10, extra='filter="url(#glow)" class="pulse"'))
     return svg(w, h, "\n".join(b), "Game over.")
 
@@ -547,6 +685,7 @@ def main():
             os.remove(os.path.join(OUT, old))
     files = {
         "banner.svg": banner(user, repos),
+        "arena.svg": arena(),
         "profile.svg": terminal(),
         "highscores.svg": highscores(repos),
         "stats.svg": stats(user, repos),
@@ -576,6 +715,7 @@ def main():
     readme = (
         "<!-- Generated by scripts/build_svgs.py (refreshed daily by .github/workflows/refresh.yml). Edit the script, not this file. -->\n"
         + img("banner.svg", f"{PROFILE['name']}, age {PROFILE['age']}: {PROFILE['bio'].lower()}. Insert star to continue.")
+        + img("arena.svg", "Space battle: my fighter shoots down a wave of raiders and a boss ship.")
         + img("profile.svg", f"Player select. Name: {PROFILE['name']}. Age: {PROFILE['age']}. Bio: {PROFILE['bio'].lower()}.")
         + img("highscores.svg", "High scores: my projects ranked by importance.")
         + "\n".join(sections)

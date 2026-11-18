@@ -272,19 +272,22 @@ def starfield(w, h, n, seed):
     return "".join(out)
 
 
-def space(w, h, seed, comets=2, asteroids=2, lanes=(), booms=0, opacity=0.9, ship=3):
+def space(w, h, seed, comets=2, asteroids=2, lanes=(), rocks=None, opacity=0.9, ship=3):
     """The moving background: comets, drifting asteroids and ship dogfights.
 
-    Every element loops forever with seeded timings, and negative delays put
-    things mid-flight the moment the image loads.
+    `lanes` are the y centres (px) of empty bands the ships fly along, so they
+    never cross text. `rocks` lists (top, bottom) bands for the asteroids.
+    In each lane our fighter flies right firing; a raider flies in from the
+    right, gets hit and explodes before they meet. Every element loops
+    forever; negative delays put things mid-flight the moment the image loads.
     """
     rnd = random.Random(seed)
     span = w + 200
-    out = [f"<style>@keyframes cm{{0%{{transform:translateX(0);opacity:1}}30%{{transform:translateX({span + 300}px);opacity:1}}"
-           f"30.1%,100%{{transform:translateX({span + 300}px);opacity:0}}}}"
-           f"@keyframes goR{{from{{transform:translateX(0)}}to{{transform:translateX({span}px)}}}}"
-           f"@keyframes goL{{from{{transform:translateX(0)}}to{{transform:translateX(-{span}px)}}}}</style>"]
-    out.append(f'<g opacity="{opacity}">')
+    css = [f"@keyframes cm{{0%{{transform:translateX(0);opacity:1}}30%{{transform:translateX({span + 300}px);opacity:1}}"
+           f"30.1%,100%{{transform:translateX({span + 300}px);opacity:0}}}}",
+           f"@keyframes goR{{from{{transform:translateX(0)}}to{{transform:translateX({span}px)}}}}",
+           f"@keyframes goL{{from{{transform:translateX(0)}}to{{transform:translateX(-{span}px)}}}}"]
+    out = []
     # comets streak diagonally, then rest off-screen
     for _ in range(comets):
         y0 = rnd.uniform(-0.2, 0.5) * h
@@ -295,45 +298,53 @@ def space(w, h, seed, comets=2, asteroids=2, lanes=(), booms=0, opacity=0.9, shi
                    f'<g style="opacity:0;animation:cm {cycle:.1f}s linear {delay:.1f}s infinite">'
                    f'<rect x="-90" y="-1.5" width="90" height="3" fill="url(#tail)"/>'
                    f'<rect x="-2" y="-3" width="6" height="6" fill="{NEON}" filter="url(#glow)"/></g></g>')
-    # asteroids drift left while spinning
+    # asteroids drift left while spinning, only inside the empty bands
+    bands = rocks or [(0.08 * h, 0.85 * h)]
     for _ in range(asteroids):
-        y = rnd.uniform(0.08, 0.85) * h
-        s = rnd.choice([2, 3, 3, 4])
+        top, bottom = rnd.choice(bands)
+        fits = [s for s in (2, 3, 4) if 9 * s <= bottom - top] or [1]
+        s = rnd.choice(fits)
+        y = rnd.uniform(top, bottom - 9 * s)
         dur = rnd.uniform(22, 40) * w / 1000 + 6
+        spin = f'class="spin" style="animation-duration:{rnd.uniform(5, 12):.1f}s"'
         out.append(f'<g style="animation:goL {dur:.1f}s linear {-rnd.uniform(0, dur):.1f}s infinite">'
                    f'<g transform="translate({w + 60},{y:.0f})">'
-                   f'{sprite(ASTEROID, 0, 0, s, {"1": DARK, "2": DIM}, f"class={chr(34)}spin{chr(34)} style={chr(34)}animation-duration:{rnd.uniform(5, 12):.1f}s{chr(34)}")}'
+                   f'{sprite(ASTEROID, 0, 0, s, {"1": DARK, "2": DIM}, spin)}'
                    f'</g></g>')
-    # dogfights: our fighter flies right firing, raiders fly left firing back
-    for lane in lanes:
-        y = lane * h
+    # dogfights
+    for i, yc in enumerate(lanes):
+        top = yc - 3.5 * ship - 3                     # centre the ship, allowing for the 6 px bob
         dur = rnd.uniform(9, 13) * max(w, 500) / 1000 + 3
         off = -rnd.uniform(0, dur)
-        out.append(f'<g style="animation:goR {dur:.1f}s linear {off:.1f}s infinite"><g transform="translate(-100,{y - 10:.0f})">'
+        # the raider dies when our laser can reach it: about 120 px between noses
+        p = max(0.1, min(0.9, (w + 140 - 11 * ship - 120) / (2 * span)))
+        pc = p * 100
+        ex = w + 40 - p * span                        # raider's x when it is hit
+        css.append(f"@keyframes ek{i}{{0%{{transform:translateX(0);opacity:1}}"
+                   f"{pc:.2f}%{{transform:translateX(-{p * span:.0f}px);opacity:1}}"
+                   f"{pc + 0.01:.2f}%{{transform:translateX(-{p * span:.0f}px);opacity:0}}"
+                   f"100%{{transform:translateX(-{span}px);opacity:0}}}}")
+        css.append(f"@keyframes bk{i}{{0%,{pc:.2f}%{{opacity:0;transform:scale(.5)}}"
+                   f"{pc + 0.3:.2f}%{{opacity:1;transform:scale(.8)}}"
+                   f"{pc + 3:.2f}%{{opacity:1;transform:scale(1.5)}}"
+                   f"{pc + 6:.2f}%,100%{{opacity:0;transform:scale(1.7)}}}}")
+        hero_glow = 'filter="url(#glow)"'
+        out.append(f'<g style="animation:goR {dur:.1f}s linear {off:.2f}s infinite"><g transform="translate(-100,{top:.0f})">'
                    f'<g class="bob">'
                    f'<rect x="{11 * ship}" y="{3 * ship}" width="{5 * ship}" height="{ship}" fill="{NEON}" class="zapR"/>'
                    f'<rect x="{11 * ship}" y="{3 * ship}" width="{5 * ship}" height="{ship}" fill="{NEON}" class="zapR" style="animation-delay:-.4s"/>'
-                   f'{sprite(HERO, 0, 0, ship, {"1": NEON, "2": BG}, chr(32) + "filter=" + chr(34) + "url(#glow)" + chr(34))}'
+                   f'{sprite(HERO, 0, 0, ship, {"1": NEON, "2": BG}, hero_glow)}'
                    f'</g></g></g>')
-        for k in range(2):
-            edur = dur * rnd.uniform(0.8, 1.1)
-            eoff = -rnd.uniform(0, edur)
-            ey = y + (k * 2 - 1) * rnd.uniform(4, 14)
-            out.append(f'<g style="animation:goL {edur:.1f}s linear {eoff:.1f}s infinite"><g transform="translate({w + 40},{ey - 10:.0f})">'
-                       f'<g class="bob" style="animation-delay:-{rnd.uniform(0, 1.6):.1f}s">'
-                       f'<rect x="{-4 * ship}" y="{3 * ship}" width="{3 * ship}" height="{ship}" fill="{MID}" class="zapL" style="animation-delay:-{rnd.uniform(0, 1):.1f}s"/>'
-                       f'{sprite(ENEMY, 0, 0, ship, {"1": MID, "2": BG})}'
-                       f'</g></g></g>')
-    # explosions pop where the fighting is
-    for _ in range(booms):
-        lane = rnd.choice(lanes) if lanes else rnd.uniform(0.2, 0.8)
-        x, y = rnd.uniform(0.1, 0.9) * w, lane * h + rnd.uniform(-12, 12)
-        cycle = rnd.uniform(3, 6)
-        out.append(f'<g transform="translate({x:.0f},{y - 13:.0f})">'
-                   f'{sprite(BURST, 0, 0, 3, {"1": NEON}, f"class={chr(34)}boom{chr(34)} style={chr(34)}animation-duration:{cycle:.1f}s;animation-delay:{rnd.uniform(0, cycle):.1f}s{chr(34)}")}'
-                   f'</g>')
-    out.append("</g>")
-    return "".join(out)
+        out.append(f'<g style="animation:ek{i} {dur:.1f}s linear {off:.2f}s infinite"><g transform="translate({w + 40},{top:.0f})">'
+                   f'<g class="bob">'
+                   f'<rect x="{-4 * ship}" y="{3 * ship}" width="{3 * ship}" height="{ship}" fill="{MID}" class="zapL"/>'
+                   f'{sprite(ENEMY, 0, 0, ship, {"1": MID, "2": BG})}'
+                   f'</g></g></g>')
+        boom = (f'style="transform-box:fill-box;transform-origin:center;opacity:0;'
+                f'animation:bk{i} {dur:.1f}s linear {off:.2f}s infinite"')
+        out.append(f'<g transform="translate({ex + 4.5 * ship - 15:.0f},{yc - 15:.0f})">'
+                   f'{sprite(BURST, 0, 0, 3, {"1": NEON}, boom)}</g>')
+    return f'<style>{"".join(css)}</style><g opacity="{opacity}">' + "".join(out) + "</g>"
 
 
 # --------------------------------------------------------------------------
@@ -363,7 +374,7 @@ def banner(user, repos):
     w, h = 1000, 330
     stars = sum(r["stargazers_count"] for r in repos)
     own = [r for r in repos if not r["fork"]]
-    b = [frame(w, h), starfield(w, h, 70, 7), space(w, h, 101, comets=3, asteroids=3, lanes=(0.74,), booms=2, ship=4)]
+    b = [frame(w, h), starfield(w, h, 70, 7), space(w, h, 101, comets=3, asteroids=3, lanes=(247,), rocks=[(86, 108), (214, 278)], ship=4)]
     b.append(pixel_text("1UP", 40, 34, 3, extra='class="blink"'))
     b.append(pixel_text(f"STARS {stars:06d}", 40, 62, 3))
     b.append(centered("PLAYER 1", w / 2, 34, 3, DIM))
@@ -381,8 +392,9 @@ def terminal():
     lines = [f"> NAME ... {PROFILE['name']}", f"> AGE .... {PROFILE['age']}", f"> BIO .... {bio[0]}"]
     lines += [f"           {rest}" for rest in bio[1:]]
     w, scale, lh = 1000, 3, 38
-    h = 76 + len(lines) * lh + 24
-    b = [frame(w, h), space(w, h, 202, comets=2, asteroids=2, lanes=(0.82,), booms=1, opacity=0.55)]
+    text_end = 76 + (len(lines) - 1) * lh + 7 * scale
+    h = text_end + 78
+    b = [frame(w, h), space(w, h, 202, comets=2, asteroids=2, lanes=(text_end + 32,), rocks=[(text_end + 8, h - 16)], opacity=0.6)]
     b.append(pixel_text("PLAYER SELECT", 34, 30, 3, DIM))
     # Lines pop in one by one. The resting state is visible, so the text still
     # shows if a viewer doesn't run SVG animations.
@@ -411,8 +423,10 @@ def highscores(repos):
     own = (ranked + rest)[:10]
     w = 1000
     top, lh = 150, 40
-    h = top + len(own) * lh + 40
-    b = [frame(w, h), starfield(w, h, 25, 11), space(w, h, 303, comets=2, asteroids=3, lanes=(0.5,), booms=2, opacity=0.5)]
+    rows_end = top + (len(own) - 1) * lh + 21
+    h = rows_end + 80
+    b = [frame(w, h), starfield(w, h, 25, 11), space(w, h, 303, comets=2, asteroids=3, lanes=(rows_end + 34,),
+                                                    rocks=[(80, 106), (rows_end + 8, h - 16)], opacity=0.6)]
     b.append(centered("HIGH SCORES", w / 2, 34, 6, extra='filter="url(#glow)"'))
     for x, label in [(60, "RANK"), (220, "PROJECT"), (650, "STARS"), (820, "LANG")]:
         b.append(pixel_text(label, x, 110, 2, DIM))
@@ -438,8 +452,9 @@ def stats(user, repos):
         langs[key] = langs.get(key, 0) + 1
     langs = sorted(langs.items(), key=lambda kv: -kv[1])[:5]
     w = 1000
-    h = 120 + max(5, len(langs)) * 36 + 60 + len(ACHIEVEMENTS) * 30 + 30
-    b = [frame(w, h), space(w, h, 404, comets=2, asteroids=3, lanes=(0.95,), booms=1, opacity=0.5)]
+    ach_end = 100 + max(5, len(langs)) * 36 + 20 + 62 + (len(ACHIEVEMENTS) - 1) * 30 + 14
+    h = ach_end + 78
+    b = [frame(w, h), space(w, h, 404, comets=2, asteroids=3, lanes=(ach_end + 32,), rocks=[(ach_end + 8, h - 16)], opacity=0.6)]
     b.append(pixel_text("PLAYER STATS", 50, 40, 4, extra='filter="url(#glow)"'))
     b.append(pixel_text("POWER-UPS", 540, 40, 4, extra='filter="url(#glow)"'))
     since = user.get("created_at", "")[:4] or "----"
@@ -471,7 +486,7 @@ def stats(user, repos):
 
 def header(label, seed):
     w, h = 1000, 70
-    b = [space(w, h, seed, comets=1, asteroids=1, lanes=(), booms=0, opacity=0.7),
+    b = [space(w, h, seed, comets=1, asteroids=1, rocks=[(6, 64)], opacity=0.7),
          f'<line x1="20" y1="35" x2="{w - 20}" y2="35" stroke="{DIM}" stroke-width="2" stroke-dasharray="6 6"/>']
     tw = text_width(label, 4)
     b.append(f'<rect x="{w / 2 - tw / 2 - 24}" y="10" width="{tw + 48}" height="50" fill="{BG}"/>')
@@ -497,7 +512,7 @@ def card(r, stage):
     name = SHORT_NAME.get(r["name"], r["name"]).upper()[:24]
     desc = TAGLINE.get(r["name"]) or (r.get("description") or "A mystery stage. Enter at your own risk.").strip()
     seed = zlib.crc32(r["name"].encode())  # stable per repo
-    b = [frame(w, h, 4, 12), starfield(w, h, 10, seed), space(w, h, seed, comets=1, asteroids=1, lanes=(), booms=0, opacity=0.5)]
+    b = [frame(w, h, 4, 12), starfield(w, h, 10, seed), space(w, h, seed, comets=1, asteroids=0, opacity=0.5)]
     b.append(pixel_text(name, 26, 26, 3, extra='filter="url(#glow)"'))
     b.append(pixel_text(stage, w - 26 - text_width(stage, 2), 30, 2, DIM))
     for i, line in enumerate(wrap(desc, 46)[:3]):
@@ -511,7 +526,7 @@ def card(r, stage):
 
 def footer():
     w, h = 1000, 200
-    b = [frame(w, h), starfield(w, h, 30, 23), space(w, h, 505, comets=3, asteroids=3, lanes=(0.2, 0.82), booms=3, opacity=0.8, ship=4)]
+    b = [frame(w, h), starfield(w, h, 30, 23), space(w, h, 505, comets=3, asteroids=3, lanes=(40, 164), rocks=[(20, 62), (142, 186)], opacity=0.8, ship=4)]
     b.append(centered("GAME OVER", w / 2, 68, 10, extra='filter="url(#glow)" class="pulse"'))
     return svg(w, h, "\n".join(b), "Game over.")
 

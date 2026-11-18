@@ -27,6 +27,12 @@
   <a href="https://github.com/shayanscripts/github-guard"><img src="assets/card-github-guard.svg" width="49%" alt="github-guard: Dependency-free Git pre-commit scanner that catches secrets before they ship."></a>
   <a href="https://github.com/shayanscripts/repolens-ai"><img src="assets/card-repolens-ai.svg" width="49%" alt="repolens-ai: AI explainer for GitHub repos: implementation guides, reading paths, architecture maps."></a>
 </p>
+
+<p align="center"><img src="assets/h-world4.svg" width="100%" alt="BONUS STAGES"></p>
+
+<p align="center">
+  <a href="https://github.com/shayanscripts/shayanscripts"><img src="assets/card-shayanscripts.svg" width="49%" alt="shayanscripts: Profile README: retro arcade, black and neon green"></a>
+</p>
 <p align="center"><img src="assets/stats.svg" width="100%" alt="Player stats, languages and achievements."></p>
 
 <p align="center"><img src="assets/footer.svg" width="100%" alt="Game over."></p>

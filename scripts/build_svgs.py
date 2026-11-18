@@ -352,6 +352,7 @@ def api(path):
 def fetch():
     user = api(f"users/{USER}")
     repos = api(f"users/{USER}/repos?per_page=100&type=owner")
+    repos = [r for r in repos if r["name"].lower() != USER.lower()]  # not the profile repo itself
     return user, repos
 
 
